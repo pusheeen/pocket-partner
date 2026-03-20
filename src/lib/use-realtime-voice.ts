@@ -21,11 +21,14 @@ export function useRealtimeVoice() {
 
   const disconnect = useCallback(() => {
     dcRef.current?.close();
+    pcRef.current?.getSenders().forEach((s) => s.track?.stop());
     pcRef.current?.close();
     dcRef.current = null;
     pcRef.current = null;
     if (audioElRef.current) {
+      audioElRef.current.pause();
       audioElRef.current.srcObject = null;
+      audioElRef.current.remove();
       audioElRef.current = null;
     }
     setState("idle");
@@ -36,6 +39,7 @@ export function useRealtimeVoice() {
     setState("connecting");
 
     try {
+      // 1. Get ephemeral token
       const tokenRes = await fetch("/api/realtime/session", { method: "POST" });
       if (!tokenRes.ok) {
         const errText = await tokenRes.text();
@@ -45,42 +49,62 @@ export function useRealtimeVoice() {
       const ephemeralKey = sessionData.client_secret?.value;
       if (!ephemeralKey) throw new Error("No ephemeral key returned");
 
-      const pc = new RTCPeerConnection();
+      // 2. Create peer connection
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
       pcRef.current = pc;
 
-      // Remote audio playback
+      // 3. Audio element — MUST be in DOM for autoplay to work
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
+      audioEl.setAttribute("playsinline", "");
+      audioEl.style.display = "none";
+      document.body.appendChild(audioEl);
       audioElRef.current = audioEl;
 
       pc.ontrack = (e) => {
+        console.log("[Realtime] Got remote audio track");
         audioEl.srcObject = e.streams[0];
+        audioEl.play().catch((err) =>
+          console.warn("[Realtime] Audio play failed:", err)
+        );
       };
 
-      // Local mic
+      // 4. Add local mic
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      stream.getTracks().forEach((track) => {
+        pc.addTrack(track, stream);
+        console.log("[Realtime] Added local audio track:", track.label);
+      });
 
-      // Data channel for events
+      // 5. Data channel
       const dc = pc.createDataChannel("oai-events");
       dcRef.current = dc;
 
       dc.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
+          console.log("[Realtime] Event:", event.type);
 
           switch (event.type) {
             case "session.created":
             case "session.updated":
+              console.log("[Realtime] Session ready, VAD active");
               setState("listening");
               break;
 
             case "input_audio_buffer.speech_started":
+              console.log("[Realtime] Speech detected");
               setState("listening");
               break;
 
             case "input_audio_buffer.speech_stopped":
-              // VAD detected speech end — server will auto-commit and respond
+              console.log("[Realtime] Speech stopped, waiting for response...");
+              break;
+
+            case "response.created":
+              console.log("[Realtime] Response generating...");
               break;
 
             case "response.audio.started":
@@ -110,7 +134,7 @@ export function useRealtimeVoice() {
               break;
 
             case "error":
-              console.error("Realtime API error:", event.error);
+              console.error("[Realtime] API error:", event.error);
               setError(event.error?.message ?? "Realtime error");
               break;
           }
@@ -120,21 +144,23 @@ export function useRealtimeVoice() {
       };
 
       dc.onopen = () => {
+        console.log("[Realtime] Data channel open");
         setState("listening");
       };
 
       dc.onclose = () => {
+        console.log("[Realtime] Data channel closed");
         disconnect();
       };
 
       dc.onerror = (e) => {
-        console.error("Data channel error:", e);
+        console.error("[Realtime] Data channel error:", e);
         setError("Connection error");
         disconnect();
       };
 
-      // Monitor connection state
       pc.onconnectionstatechange = () => {
+        console.log("[Realtime] Connection state:", pc.connectionState);
         if (
           pc.connectionState === "failed" ||
           pc.connectionState === "disconnected"
@@ -144,6 +170,11 @@ export function useRealtimeVoice() {
         }
       };
 
+      pc.oniceconnectionstatechange = () => {
+        console.log("[Realtime] ICE state:", pc.iceConnectionState);
+      };
+
+      // 6. SDP exchange
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -166,9 +197,10 @@ export function useRealtimeVoice() {
 
       const answerSdp = await sdpRes.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      console.log("[Realtime] WebRTC connected, waiting for session...");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Connection failed";
-      console.error("Realtime connect error:", msg);
+      console.error("[Realtime] Connect error:", msg);
       setError(msg);
       disconnect();
     }
