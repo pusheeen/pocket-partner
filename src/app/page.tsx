@@ -9,7 +9,7 @@ import { personas, type PersonaId } from "@/lib/personas";
 
 export default function Home() {
   const [persona, setPersona] = useState<PersonaId>("supportive");
-  const [premium, setPremium] = useState(false);
+  const [premium, setPremium] = useState(true);
   const [showSettings, setShowSettings] = useState(true);
   const personaRef = useRef<PersonaId>(persona);
   personaRef.current = persona;
