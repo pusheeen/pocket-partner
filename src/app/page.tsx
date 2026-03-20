@@ -74,17 +74,30 @@ export default function Home() {
     }
   }, [premium, status, messages, voice, currentPersona.voice]);
 
+  // Auto-fallback: if premium errors, switch to standard
+  useEffect(() => {
+    if (realtime.error && premium) {
+      console.warn("Premium mode failed, falling back to Standard:", realtime.error);
+      realtime.disconnect();
+      setPremium(false);
+      // Auto-start standard mode after a brief delay
+      setTimeout(() => {
+        voice.startLiveMode((text) => {
+          sendMessage({ text });
+        });
+      }, 500);
+    }
+  }, [realtime.error, premium, realtime, voice, sendMessage]);
+
   // One button to start/stop everything
   const handleMainAction = useCallback(() => {
     if (isLive) {
-      // Stop
       if (premium) {
         realtime.disconnect();
       } else {
         voice.endLiveMode();
       }
     } else {
-      // Start
       if (premium) {
         realtime.connect();
       } else {
