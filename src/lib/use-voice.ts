@@ -37,16 +37,22 @@ export function useVoice() {
   const onAutoStopRef = useRef<((text: string) => void) | null>(null);
   const [liveMode, setLiveMode] = useState(false);
   const speakAbortRef = useRef(false);
+  const ttsAbortRef = useRef<AbortController | null>(null);
 
   const stopSpeaking = useCallback(() => {
     speakAbortRef.current = true;
+    // Cancel all in-flight TTS fetches
+    if (ttsAbortRef.current) {
+      ttsAbortRef.current.abort();
+      ttsAbortRef.current = null;
+    }
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       audioRef.current = null;
     }
-    if (state === "speaking") setState("idle");
-  }, [state]);
+    setState("idle");
+  }, []);
 
   const cleanupVAD = useCallback(() => {
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
@@ -204,17 +210,19 @@ export function useVoice() {
     async (text: string, options?: { onDone?: () => void }) => {
       stopSpeaking();
       speakAbortRef.current = false;
+      const abortController = new AbortController();
+      ttsAbortRef.current = abortController;
       setState("speaking");
 
       const chunks = splitIntoChunks(text);
 
-      // Pre-fetch first chunk immediately, start fetching second in parallel
       const fetchChunk = (t: string) =>
         fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: t }),
-        }).then((r) => (r.ok ? r.blob() : null));
+          signal: abortController.signal,
+        }).then((r) => (r.ok ? r.blob() : null)).catch(() => null);
 
       try {
         // Start fetching the first two chunks in parallel
