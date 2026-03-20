@@ -1,65 +1,222 @@
-import Image from "next/image";
+"use client";
+
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, type UIMessage } from "ai";
+import { useVoice } from "@/lib/use-voice";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { frameworkMetadata } from "@/lib/frameworks/office-hours";
+
+const transport = new DefaultChatTransport({ api: "/api/chat" });
 
 export default function Home() {
+  const { messages, sendMessage, status } = useChat({ transport });
+  const voice = useVoice();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [textInput, setTextInput] = useState("");
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const isStreaming = status === "streaming" || status === "submitted";
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
+
+  const lastSpokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status !== "ready" || !voiceEnabled) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role === "assistant" && lastMsg.id !== lastSpokenRef.current) {
+      const text = getMessageText(lastMsg);
+      if (text) {
+        lastSpokenRef.current = lastMsg.id;
+        voice.speak(text);
+      }
+    }
+  }, [status, messages, voiceEnabled, voice]);
+
+  const handleMicPress = useCallback(async () => {
+    if (voice.isRecording) {
+      const text = await voice.stopRecording();
+      if (text) {
+        sendMessage({ text });
+      }
+    } else {
+      voice.stopSpeaking();
+      await voice.startRecording();
+    }
+  }, [voice, sendMessage]);
+
+  const handleTextSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!textInput.trim() || isStreaming) return;
+    sendMessage({ text: textInput.trim() });
+    setTextInput("");
+  };
+
+  const hasMessages = messages.length > 0;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="flex flex-col h-dvh bg-zinc-950 text-zinc-100">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/50">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{frameworkMetadata.icon}</span>
+          <h1 className="font-semibold text-sm tracking-tight">
+            Pocket Partner
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+        <button
+          onClick={() => setVoiceEnabled(!voiceEnabled)}
+          className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
+            voiceEnabled
+              ? "bg-emerald-500/15 text-emerald-400"
+              : "bg-zinc-800 text-zinc-500"
+          }`}
+        >
+          {voiceEnabled ? "Voice On" : "Voice Off"}
+        </button>
+      </header>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
+        {!hasMessages && (
+          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
+            <div className="text-4xl">💡</div>
+            <div>
+              <h2 className="text-xl font-semibold text-zinc-200 mb-2">
+                {frameworkMetadata.name}
+              </h2>
+              <p className="text-zinc-500 text-sm max-w-xs leading-relaxed">
+                {frameworkMetadata.greeting}
+              </p>
+            </div>
+            <p className="text-zinc-600 text-xs">
+              Tap the mic and start talking, or type below
+            </p>
+          </div>
+        )}
+
+        <div className="max-w-2xl mx-auto space-y-4">
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+          {isStreaming &&
+            messages[messages.length - 1]?.role !== "assistant" && (
+              <div className="flex gap-1.5 px-4 py-3">
+                <span className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce" />
+                <span className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce [animation-delay:150ms]" />
+                <span className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce [animation-delay:300ms]" />
+              </div>
+            )}
+        </div>
+      </div>
+
+      {voice.state !== "idle" && (
+        <div className="text-center py-2 text-xs text-zinc-500">
+          {voice.isRecording && (
+            <span className="text-red-400 animate-pulse">● Recording...</span>
+          )}
+          {voice.isTranscribing && <span>Transcribing...</span>}
+          {voice.isSpeaking && (
+            <button
+              onClick={voice.stopSpeaking}
+              className="text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Speaking... tap to stop
+            </button>
+          )}
+        </div>
+      )}
+
+      {voice.error && (
+        <div className="text-center py-1 text-xs text-red-400">
+          {voice.error}
+        </div>
+      )}
+
+      <div className="border-t border-zinc-800/50 px-4 py-3 pb-safe">
+        <div className="max-w-2xl mx-auto flex items-center gap-3">
+          <form onSubmit={handleTextSubmit} className="flex-1 flex gap-2">
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder="Type a message..."
+              disabled={isStreaming}
+              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 disabled:opacity-50 transition-colors"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            {textInput.trim() && (
+              <button
+                type="submit"
+                disabled={isStreaming}
+                className="bg-zinc-100 text-zinc-900 rounded-full px-4 py-2.5 text-sm font-medium hover:bg-white transition-colors disabled:opacity-50"
+              >
+                Send
+              </button>
+            )}
+          </form>
+
+          <button
+            onClick={handleMicPress}
+            disabled={voice.isTranscribing || isStreaming}
+            className={`relative flex items-center justify-center w-12 h-12 rounded-full transition-all disabled:opacity-50 ${
+              voice.isRecording
+                ? "bg-red-500 scale-110 shadow-lg shadow-red-500/25"
+                : "bg-zinc-800 hover:bg-zinc-700"
+            }`}
           >
-            Documentation
-          </a>
+            {voice.isRecording && (
+              <span className="absolute inset-0 rounded-full bg-red-500/30 animate-ping" />
+            )}
+            <MicIcon recording={voice.isRecording} />
+          </button>
         </div>
-      </main>
+      </div>
     </div>
+  );
+}
+
+function MessageBubble({ message }: { message: UIMessage }) {
+  const isUser = message.role === "user";
+  const text = getMessageText(message);
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+          isUser
+            ? "bg-zinc-100 text-zinc-900"
+            : "bg-zinc-800/60 text-zinc-200"
+        }`}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function getMessageText(message: UIMessage): string {
+  return message.parts
+    .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+    .map((p) => p.text)
+    .join("");
+}
+
+function MicIcon({ recording }: { recording: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={recording ? "white" : "#a1a1aa"}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" x2="12" y1="19" y2="22" />
+    </svg>
   );
 }
