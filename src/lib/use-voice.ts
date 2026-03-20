@@ -4,6 +4,26 @@ import { useState, useRef, useCallback } from "react";
 
 type VoiceState = "idle" | "recording" | "transcribing" | "speaking";
 
+// Split text into speakable chunks at sentence boundaries
+function splitIntoChunks(text: string): string[] {
+  const chunks: string[] = [];
+  // Split on sentence-ending punctuation followed by space or end
+  const parts = text.match(/[^.!?]+[.!?]+[\s]?|[^.!?]+$/g);
+  if (!parts) return [text];
+
+  let current = "";
+  for (const part of parts) {
+    current += part;
+    // Speak chunks of ~60-150 chars (roughly one sentence)
+    if (current.length >= 60) {
+      chunks.push(current.trim());
+      current = "";
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
+}
+
 export function useVoice() {
   const [state, setState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -16,8 +36,10 @@ export function useVoice() {
   const streamRef = useRef<MediaStream | null>(null);
   const onAutoStopRef = useRef<((text: string) => void) | null>(null);
   const [liveMode, setLiveMode] = useState(false);
+  const speakAbortRef = useRef(false);
 
   const stopSpeaking = useCallback(() => {
+    speakAbortRef.current = true;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -61,7 +83,6 @@ export function useVoice() {
     []
   );
 
-  // Start VAD monitoring — auto-stops recording after ~1.5s of silence
   const startVAD = useCallback(
     (stream: MediaStream, onSilence: () => void) => {
       const audioCtx = new AudioContext();
@@ -105,7 +126,6 @@ export function useVoice() {
     []
   );
 
-  // Start recording with optional VAD for live mode
   const startRecording = useCallback(
     async (options?: { autoStop?: boolean }) => {
       setError(null);
@@ -113,7 +133,6 @@ export function useVoice() {
       cleanupVAD();
 
       try {
-        // Reuse existing stream in live mode to avoid re-prompting for mic
         let stream = streamRef.current;
         if (!stream || !stream.active) {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -142,7 +161,6 @@ export function useVoice() {
             if (text && onAutoStopRef.current) {
               onAutoStopRef.current(text);
             } else if (!text && liveMode) {
-              // No speech detected, start listening again
               startRecording({ autoStop: true });
             }
           });
@@ -155,7 +173,6 @@ export function useVoice() {
     [stopSpeaking, cleanupVAD, startVAD, liveMode]
   );
 
-  // Internal stop that doesn't clean up the stream (for live mode reuse)
   const stopRecordingInternal = useCallback(
     async (releaseStream: boolean): Promise<string | null> => {
       cleanupVAD();
@@ -180,41 +197,68 @@ export function useVoice() {
     return stopRecordingInternal(true);
   }, [stopRecordingInternal]);
 
+  // Chunked TTS — splits text into sentences, fetches and plays each one
+  // sequentially. First sentence starts playing while later ones are still
+  // being generated, cutting perceived latency significantly.
   const speak = useCallback(
     async (text: string, options?: { onDone?: () => void }) => {
       stopSpeaking();
+      speakAbortRef.current = false;
       setState("speaking");
 
-      try {
-        const res = await fetch("/api/tts", {
+      const chunks = splitIntoChunks(text);
+
+      // Pre-fetch first chunk immediately, start fetching second in parallel
+      const fetchChunk = (t: string) =>
+        fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
+          body: JSON.stringify({ text: t }),
+        }).then((r) => (r.ok ? r.blob() : null));
 
-        if (!res.ok) throw new Error("TTS failed");
+      try {
+        // Start fetching the first two chunks in parallel
+        const pending: Promise<Blob | null>[] = chunks
+          .slice(0, 2)
+          .map(fetchChunk);
+        let nextFetchIdx = 2;
 
-        const audioBlob = await res.blob();
-        const url = URL.createObjectURL(audioBlob);
-        const audio = new Audio(url);
-        audioRef.current = audio;
+        for (let i = 0; i < chunks.length; i++) {
+          if (speakAbortRef.current) break;
 
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setState("idle");
-          options?.onDone?.();
-        };
+          // Wait for this chunk's audio
+          const audioBlob = await pending[i];
+          if (!audioBlob || speakAbortRef.current) break;
 
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setState("idle");
-          options?.onDone?.();
-        };
+          // Start fetching the next chunk while this one plays
+          if (nextFetchIdx < chunks.length) {
+            pending[nextFetchIdx] = fetchChunk(chunks[nextFetchIdx]);
+            nextFetchIdx++;
+          }
 
-        await audio.play();
+          // Play this chunk
+          const url = URL.createObjectURL(audioBlob);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+
+          await new Promise<void>((resolve) => {
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              resolve();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              resolve();
+            };
+            audio.play().catch(() => resolve());
+          });
+        }
       } catch {
+        // TTS failed entirely
+      }
+
+      audioRef.current = null;
+      if (!speakAbortRef.current) {
         setState("idle");
         options?.onDone?.();
       }
@@ -226,9 +270,7 @@ export function useVoice() {
     cleanupVAD();
     cleanupStream();
     const mr = mediaRecorderRef.current;
-    if (mr && mr.state === "recording") {
-      mr.stop();
-    }
+    if (mr && mr.state === "recording") mr.stop();
     setLiveMode(false);
     setState("idle");
     onAutoStopRef.current = null;
@@ -243,7 +285,6 @@ export function useVoice() {
     [startRecording]
   );
 
-  // Called after AI finishes speaking in live mode to auto-listen again
   const resumeListening = useCallback(() => {
     if (liveMode) {
       startRecording({ autoStop: true });

@@ -1,5 +1,5 @@
 export async function POST(req: Request) {
-  const { text } = await req.json();
+  const { text, speed } = await req.json();
 
   if (!text) {
     return Response.json({ error: "No text provided" }, { status: 400 });
@@ -15,6 +15,7 @@ export async function POST(req: Request) {
       model: "tts-1",
       input: text.slice(0, 4096),
       voice: "nova",
+      speed: speed ?? 1.0,
       response_format: "mp3",
     }),
   });
