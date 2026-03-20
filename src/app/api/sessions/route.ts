@@ -1,11 +1,12 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 export async function GET() {
-  const { userId } = await auth();
+  const authSession = await auth();
+  const userId = authSession?.user?.id;
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const userSessions = await db
@@ -27,12 +28,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
+  const authSession = await auth();
+  const userId = authSession?.user?.id;
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { persona = "supportive" } = await req.json();
 
-  const session = {
+  const newSession = {
     id: randomUUID(),
     userId,
     persona,
@@ -41,6 +43,6 @@ export async function POST(req: Request) {
     updatedAt: new Date(),
   };
 
-  await db.insert(sessions).values(session);
-  return Response.json(session);
+  await db.insert(sessions).values(newSession);
+  return Response.json(newSession);
 }
