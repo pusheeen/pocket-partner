@@ -4,12 +4,24 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useVoice } from "@/lib/use-voice";
 import { useRealtimeVoice } from "@/lib/use-realtime-voice";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { frameworkMetadata } from "@/lib/frameworks/office-hours";
-
-const transport = new DefaultChatTransport({ api: "/api/chat" });
+import { personas, type PersonaId } from "@/lib/personas";
 
 export default function Home() {
+  const [persona, setPersona] = useState<PersonaId>("supportive");
+  const personaRef = useRef<PersonaId>(persona);
+  personaRef.current = persona;
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: () => ({ persona: personaRef.current }),
+      }),
+    []
+  );
+
   const { messages, sendMessage, status } = useChat({ transport });
   const voice = useVoice();
   const realtime = useRealtimeVoice();
@@ -17,6 +29,7 @@ export default function Home() {
   const [textInput, setTextInput] = useState("");
   const [premium, setPremium] = useState(false);
   const isStreaming = status === "streaming" || status === "submitted";
+  const currentPersona = personas[persona];
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -38,13 +51,13 @@ export default function Home() {
       if (text) {
         lastSpokenRef.current = lastMsg.id;
         if (voice.liveMode) {
-          voice.speak(text, { onDone: () => voice.resumeListening() });
+          voice.speak(text, { voice: currentPersona.voice, onDone: () => voice.resumeListening() });
         } else {
-          voice.speak(text);
+          voice.speak(text, { voice: currentPersona.voice });
         }
       }
     }
-  }, [premium, status, messages, voice]);
+  }, [premium, status, messages, voice, currentPersona.voice]);
 
   const handleLiveToggle = useCallback(() => {
     if (voice.liveMode) {
@@ -105,6 +118,11 @@ export default function Home() {
           <h1 className="font-semibold text-sm tracking-tight">
             Pocket Partner
           </h1>
+          {hasMessages && (
+            <span className="text-xs text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded-full">
+              {currentPersona.emoji} {currentPersona.name}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -176,6 +194,26 @@ export default function Home() {
               <p className="text-zinc-500 text-sm max-w-xs leading-relaxed">
                 {frameworkMetadata.greeting}
               </p>
+            </div>
+            <div className="flex gap-2 mt-2">
+              {(Object.keys(personas) as PersonaId[]).map((id) => {
+                const p = personas[id];
+                const isActive = persona === id;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setPersona(id)}
+                    className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl text-xs transition-all ${
+                      isActive
+                        ? "bg-zinc-800 ring-1 ring-zinc-600 text-zinc-100"
+                        : "bg-zinc-900 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/70"
+                    }`}
+                  >
+                    <span className="text-lg">{p.emoji}</span>
+                    <span className="font-medium">{p.name}</span>
+                  </button>
+                );
+              })}
             </div>
             <p className="text-zinc-600 text-xs max-w-[280px]">
               {premium

@@ -207,7 +207,7 @@ export function useVoice() {
   // sequentially. First sentence starts playing while later ones are still
   // being generated, cutting perceived latency significantly.
   const speak = useCallback(
-    async (text: string, options?: { onDone?: () => void }) => {
+    async (text: string, options?: { onDone?: () => void; voice?: string }) => {
       stopSpeaking();
       speakAbortRef.current = false;
       const abortController = new AbortController();
@@ -220,7 +220,7 @@ export function useVoice() {
         fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: t }),
+          body: JSON.stringify({ text: t, voice: options?.voice }),
           signal: abortController.signal,
         }).then((r) => (r.ok ? r.blob() : null)).catch(() => null);
 
