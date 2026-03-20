@@ -100,8 +100,8 @@ export function useVoice() {
       analyserRef.current = analyser;
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const SILENCE_THRESHOLD = 15;
-      const SILENCE_DURATION = 1500;
+      const SILENCE_THRESHOLD = 8;
+      const SILENCE_DURATION = 1800;
       let lastSoundTime = Date.now();
 
       const check = () => {

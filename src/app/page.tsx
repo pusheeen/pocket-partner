@@ -10,7 +10,7 @@ import { personas, type PersonaId } from "@/lib/personas";
 export default function Home() {
   const [persona, setPersona] = useState<PersonaId>("supportive");
   const [premium, setPremium] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(true);
   const personaRef = useRef<PersonaId>(persona);
   personaRef.current = persona;
 
@@ -37,6 +37,11 @@ export default function Home() {
 
   // Are we in an active voice session?
   const isLive = premium ? realtime.isConnected : voice.liveMode;
+
+  // Auto-hide settings when conversation starts
+  useEffect(() => {
+    if (hasMessages || isLive) setShowSettings(false);
+  }, [hasMessages, isLive]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -118,9 +123,14 @@ export default function Home() {
         </div>
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="text-zinc-500 hover:text-zinc-300 transition-colors p-1"
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full transition-colors ${
+            showSettings
+              ? "bg-zinc-800 text-zinc-200"
+              : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+          }`}
         >
           <SettingsIcon />
+          {showSettings ? "Hide" : "Settings"}
         </button>
       </header>
 
