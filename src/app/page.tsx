@@ -190,6 +190,21 @@ export default function Home() {
               </button>
             </div>
           </div>
+          <div className="pt-1 border-t border-zinc-800/30">
+            <p className="text-xs text-zinc-500 mb-2">Also on Telegram</p>
+            <a
+              href="https://t.me/CuteStochastic_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2.5 bg-zinc-900 rounded-xl px-3 py-2.5 hover:bg-zinc-800/70 transition-colors"
+            >
+              <span className="text-lg">✈️</span>
+              <div className="text-left">
+                <p className="text-xs font-medium text-zinc-200">@CuteStochastic_bot</p>
+                <p className="text-[11px] text-zinc-500">Send a text or voice message to start</p>
+              </div>
+            </a>
+          </div>
         </div>
       )}
 
