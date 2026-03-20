@@ -2,34 +2,73 @@ import { signIn } from "@/lib/auth";
 
 export default function LoginPage() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-dvh bg-zinc-950 text-zinc-100 px-4">
-      <div className="flex flex-col items-center gap-8 max-w-xs text-center">
-        <div className="text-5xl">💡</div>
-        <div>
-          <h1 className="text-2xl font-semibold mb-2">Pocket Partner</h1>
-          <p className="text-zinc-500 text-sm leading-relaxed">
-            Voice-powered startup thinking.
-            <br />
-            Sign in to start your session.
+    <div className="flex flex-col items-center justify-center min-h-dvh bg-zinc-950 text-zinc-100 px-6">
+      <div className="flex flex-col items-center gap-10 max-w-sm text-center">
+        {/* Logo / hero */}
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/10 flex items-center justify-center border border-amber-500/20">
+            <span className="text-3xl">💡</span>
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight mb-2">
+              Pocket Partner
+            </h1>
+            <p className="text-zinc-400 text-base leading-relaxed">
+              Your voice-powered startup advisor.
+              <br />
+              <span className="text-zinc-500">
+                Talk through ideas, get pushed back, think sharper.
+              </span>
+            </p>
+          </div>
+        </div>
+
+        {/* Features */}
+        <div className="flex flex-col gap-3 w-full">
+          <div className="flex items-center gap-3 bg-zinc-900/60 rounded-xl px-4 py-3 border border-zinc-800/50">
+            <span className="text-lg">🎙️</span>
+            <div className="text-left">
+              <p className="text-sm font-medium text-zinc-200">Voice-first conversations</p>
+              <p className="text-xs text-zinc-500">Talk naturally, get voice responses back</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 bg-zinc-900/60 rounded-xl px-4 py-3 border border-zinc-800/50">
+            <span className="text-lg">🧠</span>
+            <div className="text-left">
+              <p className="text-sm font-medium text-zinc-200">YC-quality thinking frameworks</p>
+              <p className="text-xs text-zinc-500">Office hours, brainstorming, CEO review</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 bg-zinc-900/60 rounded-xl px-4 py-3 border border-zinc-800/50">
+            <span className="text-lg">📚</span>
+            <div className="text-left">
+              <p className="text-sm font-medium text-zinc-200">Powered by Lenny&apos;s Podcast</p>
+              <p className="text-xs text-zinc-500">Insights from 50+ founder interviews</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Sign in */}
+        <div className="flex flex-col items-center gap-4 w-full">
+          <form
+            action={async () => {
+              "use server";
+              await signIn("google", { redirectTo: "/" });
+            }}
+            className="w-full"
+          >
+            <button
+              type="submit"
+              className="w-full flex items-center justify-center gap-3 bg-white text-zinc-900 rounded-full px-6 py-3.5 text-sm font-semibold hover:bg-zinc-100 transition-colors shadow-lg shadow-white/5"
+            >
+              <GoogleIcon />
+              Continue with Google
+            </button>
+          </form>
+          <p className="text-zinc-600 text-xs">
+            We only use your email to save your sessions.
           </p>
         </div>
-        <form
-          action={async () => {
-            "use server";
-            await signIn("google", { redirectTo: "/" });
-          }}
-        >
-          <button
-            type="submit"
-            className="flex items-center gap-3 bg-white text-zinc-900 rounded-full px-6 py-3 text-sm font-medium hover:bg-zinc-100 transition-colors"
-          >
-            <GoogleIcon />
-            Sign in with Google
-          </button>
-        </form>
-        <p className="text-zinc-600 text-xs">
-          We only use your email to save your sessions.
-        </p>
       </div>
     </div>
   );
