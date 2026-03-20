@@ -36,18 +36,19 @@ export function useRealtimeVoice() {
     setState("connecting");
 
     try {
-      // 1. Get ephemeral token from our server
       const tokenRes = await fetch("/api/realtime/session", { method: "POST" });
-      if (!tokenRes.ok) throw new Error("Failed to create session");
-      const { client_secret } = await tokenRes.json();
-      const ephemeralKey = client_secret?.value;
+      if (!tokenRes.ok) {
+        const errText = await tokenRes.text();
+        throw new Error(`Session failed: ${errText}`);
+      }
+      const sessionData = await tokenRes.json();
+      const ephemeralKey = sessionData.client_secret?.value;
       if (!ephemeralKey) throw new Error("No ephemeral key returned");
 
-      // 2. Create peer connection
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
 
-      // 3. Set up remote audio playback
+      // Remote audio playback
       const audioEl = document.createElement("audio");
       audioEl.autoplay = true;
       audioElRef.current = audioEl;
@@ -56,11 +57,11 @@ export function useRealtimeVoice() {
         audioEl.srcObject = e.streams[0];
       };
 
-      // 4. Add local mic track
+      // Local mic
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // 5. Create data channel for events
+      // Data channel for events
       const dc = pc.createDataChannel("oai-events");
       dcRef.current = dc;
 
@@ -68,34 +69,50 @@ export function useRealtimeVoice() {
         try {
           const event = JSON.parse(e.data);
 
-          if (event.type === "response.audio.started") {
-            setState("speaking");
-          }
+          switch (event.type) {
+            case "session.created":
+            case "session.updated":
+              setState("listening");
+              break;
 
-          if (event.type === "response.audio.done") {
-            setState("listening");
-          }
+            case "input_audio_buffer.speech_started":
+              setState("listening");
+              break;
 
-          if (event.type === "input_audio_buffer.speech_started") {
-            setState("listening");
-          }
+            case "input_audio_buffer.speech_stopped":
+              // VAD detected speech end — server will auto-commit and respond
+              break;
 
-          // Capture transcripts
-          if (
-            event.type ===
-            "conversation.item.input_audio_transcription.completed"
-          ) {
-            const text = event.transcript?.trim();
-            if (text) {
-              setTranscripts((prev) => [...prev, { role: "user", text }]);
-            }
-          }
+            case "response.audio.started":
+              setState("speaking");
+              break;
 
-          if (event.type === "response.audio_transcript.done") {
-            const text = event.transcript?.trim();
-            if (text) {
-              setTranscripts((prev) => [...prev, { role: "assistant", text }]);
-            }
+            case "response.audio.done":
+              setState("listening");
+              break;
+
+            case "conversation.item.input_audio_transcription.completed":
+              if (event.transcript?.trim()) {
+                setTranscripts((prev) => [
+                  ...prev,
+                  { role: "user", text: event.transcript.trim() },
+                ]);
+              }
+              break;
+
+            case "response.audio_transcript.done":
+              if (event.transcript?.trim()) {
+                setTranscripts((prev) => [
+                  ...prev,
+                  { role: "assistant", text: event.transcript.trim() },
+                ]);
+              }
+              break;
+
+            case "error":
+              console.error("Realtime API error:", event.error);
+              setError(event.error?.message ?? "Realtime error");
+              break;
           }
         } catch {
           // ignore parse errors
@@ -110,11 +127,26 @@ export function useRealtimeVoice() {
         disconnect();
       };
 
-      // 6. Create and set local offer
+      dc.onerror = (e) => {
+        console.error("Data channel error:", e);
+        setError("Connection error");
+        disconnect();
+      };
+
+      // Monitor connection state
+      pc.onconnectionstatechange = () => {
+        if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "disconnected"
+        ) {
+          setError("Connection lost");
+          disconnect();
+        }
+      };
+
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // 7. Send offer to OpenAI Realtime API
       const sdpRes = await fetch(
         "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
         {
@@ -127,15 +159,17 @@ export function useRealtimeVoice() {
         }
       );
 
-      if (!sdpRes.ok) throw new Error("Failed to establish WebRTC connection");
+      if (!sdpRes.ok) {
+        const errText = await sdpRes.text();
+        throw new Error(`WebRTC handshake failed: ${errText}`);
+      }
 
       const answerSdp = await sdpRes.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-      setState("connected");
-      // Will transition to "listening" when data channel opens
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Connection failed");
+      const msg = err instanceof Error ? err.message : "Connection failed";
+      console.error("Realtime connect error:", msg);
+      setError(msg);
       disconnect();
     }
   }, [disconnect]);
