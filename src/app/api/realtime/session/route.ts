@@ -1,5 +1,8 @@
 import { officeHoursSystemPrompt } from "@/lib/frameworks/office-hours";
 
+// Realtime API has different voices than TTS API
+const REALTIME_VOICE = "coral";
+
 export async function POST() {
   const response = await fetch(
     "https://api.openai.com/v1/realtime/sessions",
@@ -11,7 +14,7 @@ export async function POST() {
       },
       body: JSON.stringify({
         model: "gpt-4o-realtime-preview",
-        voice: "nova",
+        voice: REALTIME_VOICE,
         instructions: officeHoursSystemPrompt,
         input_audio_transcription: { model: "whisper-1" },
         turn_detection: {
