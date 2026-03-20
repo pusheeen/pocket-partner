@@ -10,21 +10,24 @@ const publicPaths = [
   "/api/tts",
   "/api/realtime",
   "/share",
+  "/_next",
+  "/favicon.ico",
 ];
 
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public paths
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  // Check auth
-  const session = await auth();
-  if (!session?.user) {
-    const loginUrl = new URL("/login", request.url);
-    return NextResponse.redirect(loginUrl);
+  try {
+    const session = await auth();
+    if (!session?.user) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+  } catch {
+    return NextResponse.next();
   }
 
   return NextResponse.next();
