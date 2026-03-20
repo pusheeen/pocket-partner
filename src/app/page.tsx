@@ -13,7 +13,6 @@ export default function Home() {
   const voice = useVoice();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [textInput, setTextInput] = useState("");
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const isStreaming = status === "streaming" || status === "submitted";
 
   useEffect(() => {
@@ -23,25 +22,41 @@ export default function Home() {
     });
   }, [messages]);
 
+  // Auto-speak assistant messages + auto-resume listening in live mode
   const lastSpokenRef = useRef<string | null>(null);
   useEffect(() => {
-    if (status !== "ready" || !voiceEnabled) return;
+    if (status !== "ready") return;
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.role === "assistant" && lastMsg.id !== lastSpokenRef.current) {
+    if (
+      lastMsg?.role === "assistant" &&
+      lastMsg.id !== lastSpokenRef.current
+    ) {
       const text = getMessageText(lastMsg);
       if (text) {
         lastSpokenRef.current = lastMsg.id;
-        voice.speak(text);
+        if (voice.liveMode) {
+          voice.speak(text, { onDone: () => voice.resumeListening() });
+        } else {
+          voice.speak(text);
+        }
       }
     }
-  }, [status, messages, voiceEnabled, voice]);
+  }, [status, messages, voice]);
+
+  const handleLiveToggle = useCallback(() => {
+    if (voice.liveMode) {
+      voice.endLiveMode();
+    } else {
+      voice.startLiveMode((text) => {
+        sendMessage({ text });
+      });
+    }
+  }, [voice, sendMessage]);
 
   const handleMicPress = useCallback(async () => {
     if (voice.isRecording) {
       const text = await voice.stopRecording();
-      if (text) {
-        sendMessage({ text });
-      }
+      if (text) sendMessage({ text });
     } else {
       voice.stopSpeaking();
       await voice.startRecording();
@@ -67,14 +82,14 @@ export default function Home() {
           </h1>
         </div>
         <button
-          onClick={() => setVoiceEnabled(!voiceEnabled)}
-          className={`text-xs px-2.5 py-1 rounded-full transition-colors ${
-            voiceEnabled
-              ? "bg-emerald-500/15 text-emerald-400"
-              : "bg-zinc-800 text-zinc-500"
+          onClick={handleLiveToggle}
+          className={`text-xs px-3 py-1.5 rounded-full font-medium transition-all ${
+            voice.liveMode
+              ? "bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30"
+              : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
           }`}
         >
-          {voiceEnabled ? "Voice On" : "Voice Off"}
+          {voice.liveMode ? "● Live" : "Go Live"}
         </button>
       </header>
 
@@ -90,8 +105,10 @@ export default function Home() {
                 {frameworkMetadata.greeting}
               </p>
             </div>
-            <p className="text-zinc-600 text-xs">
-              Tap the mic and start talking, or type below
+            <p className="text-zinc-600 text-xs max-w-[250px]">
+              {voice.liveMode
+                ? "Just start talking — I'll listen and respond automatically"
+                : "Tap \"Go Live\" for hands-free conversation, or use the mic / type below"}
             </p>
           </div>
         )}
@@ -111,18 +128,35 @@ export default function Home() {
         </div>
       </div>
 
-      {voice.state !== "idle" && (
-        <div className="text-center py-2 text-xs text-zinc-500">
-          {voice.isRecording && (
-            <span className="text-red-400 animate-pulse">● Recording...</span>
+      {/* Voice status — more prominent in live mode */}
+      {(voice.state !== "idle" || voice.liveMode) && (
+        <div className="text-center py-2">
+          {voice.liveMode && voice.state === "idle" && !isStreaming && (
+            <span className="text-xs text-zinc-600">
+              Waiting for you to speak...
+            </span>
           )}
-          {voice.isTranscribing && <span>Transcribing...</span>}
+          {voice.isRecording && (
+            <div className="flex items-center justify-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
+              </span>
+              <span className="text-xs text-red-400">Listening...</span>
+            </div>
+          )}
+          {voice.isTranscribing && (
+            <span className="text-xs text-zinc-500">Processing...</span>
+          )}
           {voice.isSpeaking && (
             <button
-              onClick={voice.stopSpeaking}
-              className="text-zinc-400 hover:text-zinc-200 transition-colors"
+              onClick={() => {
+                voice.stopSpeaking();
+                if (voice.liveMode) voice.resumeListening();
+              }}
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
             >
-              Speaking... tap to stop
+              Speaking... tap to interrupt
             </button>
           )}
         </div>
@@ -134,42 +168,61 @@ export default function Home() {
         </div>
       )}
 
+      {/* Input area — collapses in live mode */}
       <div className="border-t border-zinc-800/50 px-4 py-3 pb-safe">
         <div className="max-w-2xl mx-auto flex items-center gap-3">
-          <form onSubmit={handleTextSubmit} className="flex-1 flex gap-2">
-            <input
-              type="text"
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              placeholder="Type a message..."
-              disabled={isStreaming}
-              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 disabled:opacity-50 transition-colors"
-            />
-            {textInput.trim() && (
-              <button
-                type="submit"
-                disabled={isStreaming}
-                className="bg-zinc-100 text-zinc-900 rounded-full px-4 py-2.5 text-sm font-medium hover:bg-white transition-colors disabled:opacity-50"
+          {voice.liveMode ? (
+            <button
+              onClick={handleLiveToggle}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-500 text-sm hover:text-zinc-300 transition-colors"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              Tap to end live conversation
+            </button>
+          ) : (
+            <>
+              <form
+                onSubmit={handleTextSubmit}
+                className="flex-1 flex gap-2"
               >
-                Send
-              </button>
-            )}
-          </form>
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Type a message..."
+                  disabled={isStreaming}
+                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded-full px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600 disabled:opacity-50 transition-colors"
+                />
+                {textInput.trim() && (
+                  <button
+                    type="submit"
+                    disabled={isStreaming}
+                    className="bg-zinc-100 text-zinc-900 rounded-full px-4 py-2.5 text-sm font-medium hover:bg-white transition-colors disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                )}
+              </form>
 
-          <button
-            onClick={handleMicPress}
-            disabled={voice.isTranscribing || isStreaming}
-            className={`relative flex items-center justify-center w-12 h-12 rounded-full transition-all disabled:opacity-50 ${
-              voice.isRecording
-                ? "bg-red-500 scale-110 shadow-lg shadow-red-500/25"
-                : "bg-zinc-800 hover:bg-zinc-700"
-            }`}
-          >
-            {voice.isRecording && (
-              <span className="absolute inset-0 rounded-full bg-red-500/30 animate-ping" />
-            )}
-            <MicIcon recording={voice.isRecording} />
-          </button>
+              <button
+                onClick={handleMicPress}
+                disabled={voice.isTranscribing || isStreaming}
+                className={`relative flex items-center justify-center w-12 h-12 rounded-full transition-all disabled:opacity-50 ${
+                  voice.isRecording
+                    ? "bg-red-500 scale-110 shadow-lg shadow-red-500/25"
+                    : "bg-zinc-800 hover:bg-zinc-700"
+                }`}
+              >
+                {voice.isRecording && (
+                  <span className="absolute inset-0 rounded-full bg-red-500/30 animate-ping" />
+                )}
+                <MicIcon recording={voice.isRecording} />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
